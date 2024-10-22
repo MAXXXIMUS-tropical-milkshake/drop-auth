@@ -1,0 +1,68 @@
+services:
+  backend:
+    container_name: drop-auth
+    restart: always
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    networks:
+      - drop-auth
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "./bin/migrator -db_url postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB} -migrations_path ${MIGRATIONS_PATH} &&
+      ./bin/drop-auth -db_url postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB} -grpc_port ${GRPC_PORT} -http_port ${HTTP_PORT} -redis_password ${REDIS_PASSWORD} -redis_addr ${REDIS_ADDRESS} -cert ${CERT} -key ${KEY} -jwt_secret ${JWT_SECRET} -access_token_ttl ${ACCESS_TOKEN_TTL} -refresh_token_ttl ${REFRESH_TOKEN_TTL} -read_timeout ${READ_TIMEOUT} -log_level ${LOG_LEVEL}"
+
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: postgres
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_DB: $POSTGRES_DB
+    networks:
+      - drop-auth
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+  
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    networks:
+      - drop-auth
+    volumes:
+      - redis-data:/var/lib/redis/data
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    command: /bin/sh -c "redis-server --requirepass ${REDIS_PASSWORD}"
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  drop-auth:
+    driver: bridge
